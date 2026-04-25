@@ -903,8 +903,8 @@ class FeedbackReceived(DomainEvent):
 ## OPS
 
 - **Type**: folder
-- **Parent**: `../CLAUDE.md`
-- **Root**: `../../../../`
+- **Parent**: `../../CLAUDE.md`
+- **Root**: `../../../../../`
 - **Мета-файлы**: [.timeline](.timeline), [.links](.links)
 
 ### Seed Protocol

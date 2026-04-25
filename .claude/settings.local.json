@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "PowerShell(docker compose version *)",
+      "Bash(git mv *)",
+      "Bash(rmdir core *)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, '.'\\); from crawler.core import models, contracts, events; print\\('OK', models.SourceMode, len\\(events.DomainEvent.__subclasses__\\(\\)\\)\\)\")",
+      "Bash(pip install *)",
+      "Bash(python -m pip install -e \".[dev]\")",
+      "Bash(python -c \"from crawler.core import models, contracts, events; print\\('OK'\\); print\\('SourceMode:', models.SourceMode\\); print\\('events:', [c.event_type for c in events.DomainEvent.__subclasses__\\(\\)]\\)\")",
+      "Bash(python -m mypy crawler/core)",
+      "Bash(python -c \"from mypy.api import run; r = run\\(['crawler/core']\\); print\\('STDOUT:'\\); print\\(r[0]\\); print\\('STDERR:'\\); print\\(r[1]\\); print\\('exit:', r[2]\\)\")",
+      "Bash(python -m pip install pyright)",
+      "Bash(python -m pyright crawler/core)",
+      "Bash(python -c \"from crawler.storage import Database, Repository; from crawler.storage.migrate import run_migrations, _discover, MIGRATIONS_DIR; print\\('OK', [m.version for m in _discover\\(MIGRATIONS_DIR\\)]\\)\")",
+      "Bash(python -m pyright crawler)",
+      "Bash(python -m pytest tests/integration/test_storage.py -v --collect-only)",
+      "Bash(python -m pytest tests/integration/test_storage.py -v)",
+      "Bash(python -m pyright crawler tests)",
+      "PowerShell(Get-Command *)",
+      "Bash(python -m pip install pglast)",
+      "Bash(python -c ' *)",
+      "Bash(python -m pip uninstall -y pglast)",
+      "Bash(python -m pip install sqlparse)",
+      "Bash(python -m pip uninstall -y sqlparse)",
+      "Bash(python -m pytest tests -v)",
+      "Bash(export CRAWLER_DATABASE_DSN='postgresql://crawler:crawler@localhost:5432/crawler')",
+      "Bash(python -m crawler.storage.migrate)",
+      "Bash(docker exec crawler-postgres *)",
+      "Bash(docker pull *)",
+      "Bash(docker image *)",
+      "Bash(docker run *)",
+      "Bash(python -m pytest tests/integration/test_storage.py::test_migration_applies_cleanly -v)",
+      "Bash(python -m pytest tests/integration/test_storage.py::test_insert_and_get_signal -vv)",
+      "Bash(python -m pytest tests/integration/test_storage.py)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "unity"
+  ]
+}

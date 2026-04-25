@@ -800,8 +800,8 @@ LIMIT $6;
 ## OPS
 
 - **Type**: folder
-- **Parent**: `../CLAUDE.md`
-- **Root**: `../../../../`
+- **Parent**: `../../CLAUDE.md`
+- **Root**: `../../../../../`
 - **Мета-файлы**: [.timeline](.timeline), [.links](.links)
 
 <!-- OPS:SEED:BEGIN -->

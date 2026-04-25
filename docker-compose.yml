@@ -1,0 +1,37 @@
+# Local development stack for E1.
+# Single Postgres 16 instance with pgvector and pgmq.
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose up -d postgres
+#   python -m crawler.storage.migrate
+#
+# Tembo's pg16-pgmq image ships with pgmq but not pgvector; the small
+# Dockerfile in ./docker layers pgvector on top via apt.
+
+services:
+  postgres:
+    build:
+      context: ./docker
+      dockerfile: postgres.Dockerfile
+    image: crawler-postgres:16
+    container_name: crawler-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crawler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crawler}
+      POSTGRES_DB: ${POSTGRES_DB:-crawler}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - crawler_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crawler} -d ${POSTGRES_DB:-crawler}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  crawler_pgdata:
+    name: crawler_pgdata
