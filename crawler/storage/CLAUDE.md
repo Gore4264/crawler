@@ -797,6 +797,378 @@ LIMIT $6;
 
 ---
 
+---
+
+## G. Project-CRUD методы IRepository (E1 / Ветка 3 — additive расширение)
+
+Этот раздел добавлен в рамках E1 / Ветка 3 (CLI + projects-CRUD). Все изменения —
+**additive** расширение IRepository (см. `core/CLAUDE.md` E.2 — additive-изменения allowed).
+Существующие методы A-F не затронуты.
+
+### G.1. Новая таблица `projects` — миграция 002
+
+**Файл:** `storage/migrations/002_projects.sql`
+
+```sql
+CREATE TABLE projects (
+    id            TEXT         PRIMARY KEY,
+    name          TEXT         NOT NULL,
+    config        JSONB        NOT NULL,         -- весь Project как JSONB (model_dump(mode="json"))
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    is_active     BOOLEAN      NOT NULL DEFAULT TRUE,
+    CONSTRAINT projects_id_slug CHECK (id ~ '^[a-z0-9_-]+$')
+);
+
+CREATE INDEX idx_projects_active_created ON projects(is_active, created_at DESC);
+```
+
+**Решение: хранить весь `Project` как JSONB `config`, а не разносить по колонкам.**
+
+Обоснование:
+- `Project` имеет nested структуру: `queries: list[TopicQuery]`, `TopicQuery.keywords: list[str]`,
+  `BudgetConfig.per_source_usd: dict[str, Decimal]`, `pipeline: list[str | dict]`.
+  Разнесение требует нескольких JOIN-таблиц или `TEXT[]`-колонок для nested структур.
+- `ALTER TABLE` при каждом изменении модели `Project` (добавление поля в Phase 1+) — дорого.
+  С JSONB: Pydantic `model_validate` справляется с missing полями через `default_factory` автоматически.
+- Поиск по `id`, `is_active` — простые колонки. Полнотекстовый поиск по keywords через
+  `config->'queries'->>0->'keywords'` (GIN JSONB-индекс) — добавляется в Phase 1+ если нужен.
+
+**FK от `signals.project_id` на `projects.id`:**
+
+В текущей схеме `signals.project_id TEXT NOT NULL` без FK (см. storage/CLAUDE.md D).
+После появления таблицы `projects` — теоретически можно добавить FK через миграцию 002b.
+
+**Решение: НЕ добавлять FK в миграции 002.** Обоснование:
+- Данные в `signals` из E1 / Ветка 1 уже содержат `project_id`-строки без FK-контракта.
+- `DELETE FROM projects` требует сначала удалить signals — это уже обеспечивается в
+  `api_core/projects.py::delete_project` логикой CASCADE на уровне приложения.
+- Strict-FK через `DEFERRABLE INITIALLY DEFERRED` возможен, но усложняет порядок операций:
+  bulk import данных (Phase 1+), migrate existing projects, тест-fixtures. Для Phase 0
+  application-level cascade достаточен.
+- В Phase 1+ когда появятся `mention_project` many-to-many и другие таблицы с FK —
+  пересмотреть все FK одновременно через consolidated миграцию.
+
+**Идемпотентность:** миграция 002 применяется через существующий sha256-checksum runner
+(см. B.3). `CREATE TABLE IF NOT EXISTS` не нужен — runner обеспечивает применение ровно один раз.
+
+### G.2. Паттерн Project ↔ JSONB
+
+**INSERT (create_project):**
+
+```python
+# Сериализация Project → JSONB
+config_json = project.model_dump(mode="json")
+# INSERT INTO projects (id, name, config) VALUES ($1, $2, $3::jsonb)
+# → asyncpg JSONB codec (json.dumps) конвертирует dict → строку
+```
+
+**SELECT (get_project, list_projects):**
+
+```python
+# Десериализация JSONB → Project
+row = await conn.fetchrow("SELECT id, name, config, created_at, is_active FROM projects WHERE id=$1", project_id)
+if row:
+    project = Project.model_validate(row["config"])
+    # Note: created_at берётся из row["created_at"] если нужен (например для project show)
+    # Project-модель не содержит created_at — это мета-данные таблицы
+```
+
+**Pydantic JSONB-roundtrip гарантии:**
+- `Decimal` в `BudgetConfig.monthly_usd` — в JSON как `str` через `mode="json"`. При
+  `model_validate` Pydantic принимает str-Decimal.
+- `list[str | dict]` в `pipeline` — сериализуется как JSON-массив, десериализуется без потерь.
+- `TopicQuery.topic_embedding: list[float] | None` — в Phase 0 всегда `None`; при E2
+  будет заполняться при `project create` (Voyage embed). `model_dump(mode="json")` сериализует
+  list[float] как JSON-массив нормально.
+
+**`updated_at` trigger-less обновление:**
+
+В `update_project` (если появится в Phase 1+) — явный `SET updated_at = NOW()` в SQL.
+В Phase 0 нет `update_project` метода; `updated_at` дефолтируется в NOW() при INSERT
+и остаётся неизменным (проекты не редактируются, только создаются/удаляются).
+
+### G.3. Новые методы IRepository (4 project-CRUD + 3 вспомогательных)
+
+Все методы добавляются в `core/contracts.py` Protocol `IRepository` (additive).
+Реализуются в `storage/repositories.py` класс `Repository`.
+FakeRepository в `processing/_fakes.py` обновляется с `raise NotImplementedError("requires E1/Ветка 3")`.
+
+#### G.3.1. `create_project`
+
+**Сигнатура:**
+
+```python
+async def create_project(self, project: Project) -> Project:
+    """
+    INSERT INTO projects (id, name, config, is_active)
+    VALUES ($1, $2, $3::jsonb, TRUE).
+    Returns: project с заполненным created_at (берётся из row после RETURNING).
+    Raises: asyncpg.UniqueViolationError если id уже существует → api_core конвертирует в ProjectAlreadyExistsError.
+    """
+```
+
+**SQL:**
+
+```sql
+INSERT INTO projects (id, name, config, is_active)
+VALUES ($1, $2, $3::jsonb, TRUE)
+RETURNING id, name, config, created_at, updated_at, is_active;
+```
+
+`RETURNING` позволяет получить `created_at` без второго SELECT.
+`Project` не содержит `created_at` — поле в таблице для метаданных. Возвращаем исходный
+`project` (не парсим RETURNING обратно в Project — избыточно). Дата создания доступна
+через `project show` (отдельный SELECT).
+
+#### G.3.2. `list_projects`
+
+**Сигнатура:**
+
+```python
+async def list_projects(self, active_only: bool = True) -> list[Project]:
+    """
+    SELECT config FROM projects
+    WHERE ($1::bool IS FALSE OR is_active = TRUE)
+    ORDER BY created_at DESC;
+    """
+```
+
+**SQL:**
+
+```sql
+SELECT id, name, config, created_at, is_active
+FROM projects
+WHERE (NOT $1 OR is_active = TRUE)
+ORDER BY created_at DESC;
+```
+
+Маппинг: `Project.model_validate(row["config"])` для каждой строки.
+
+**Дополнительные данные для `project list` (created_at, last_scan_at, signals_count):**
+Берутся через отдельные методы `last_scanned_at` (уже в IRepository) и `count_signals`
+(новый, см. G.3.6). Не встраиваются в `list_projects` — они требуют JOIN с другими таблицами,
+что нарушает single-responsibility метода.
+
+#### G.3.3. `get_project`
+
+**Сигнатура:**
+
+```python
+async def get_project(self, project_id: str) -> Project | None:
+    """
+    SELECT config FROM projects WHERE id = $1 AND is_active = TRUE;
+    Возвращает None если не найден.
+    """
+```
+
+**SQL:**
+
+```sql
+SELECT config FROM projects WHERE id = $1;
+```
+
+Заметка: фильтрация по `is_active` опциональна. `get_project` возвращает проект
+независимо от `is_active` — это нужно для `delete_project` (нужно удалить даже
+деактивированный проект). `list_projects(active_only=True)` фильтрует; `get_project` — нет.
+
+#### G.3.4. `delete_project`
+
+**Сигнатура:**
+
+```python
+async def delete_project(
+    self,
+    project_id: str,
+    *,
+    cascade: bool = True,
+) -> None:
+    """
+    В одной транзакции:
+    1. Если cascade=True:
+       DELETE FROM signals WHERE project_id = $1;
+       DELETE FROM scan_log WHERE project_id = $1;
+       DELETE FROM usage_log WHERE project_id = $1;
+    2. DELETE FROM projects WHERE id = $1;
+    """
+```
+
+**SQL (транзакция):**
+
+```sql
+-- Шаг 1 (если cascade):
+DELETE FROM signals WHERE project_id = $1;
+DELETE FROM scan_log WHERE project_id = $1;
+DELETE FROM usage_log WHERE project_id = $1;
+
+-- Шаг 2:
+DELETE FROM projects WHERE id = $1;
+```
+
+**Транзакционность:** все DELETE в одном `async with self._db.transaction() as conn:`.
+Если что-то падает — rollback, проект не удалён.
+
+**`mentions` — НЕ удаляются** (см. cli/CLAUDE.md B.4):
+- `content_hash` глобален (ADR-0004).
+- `signals.mention_id` — `ON DELETE RESTRICT`, поэтому сначала DELETE signals, потом
+  теоретически можно DELETE mentions. Но mentions могут быть shared между проектами
+  (через signals других проектов). Удаление mentions — dangerous. **Не делаем.**
+
+#### G.3.5. `get_mention`
+
+**Сигнатура:**
+
+```python
+async def get_mention(self, mention_id: UUID) -> NormalizedMention | None:
+    """
+    SELECT * FROM mentions WHERE id = $1.
+    Маппинг → NormalizedMention.model_validate(dict(row)).
+    """
+```
+
+**SQL:**
+
+```sql
+SELECT id, content_hash, source_id, external_id,
+       author, author_id, text, text_html, url, lang_hint,
+       engagement, raw, published_at, discovered_at, fetched_at,
+       text_clean, lang, is_html_stripped, normalize_version, tracking_params_removed,
+       created_at
+FROM mentions
+WHERE id = $1;
+```
+
+Маппинг:
+- `embedding = None` (нет колонки в Phase 0).
+- `minhash_signature = None` (нет колонки в Phase 0).
+- Оба поля — `NormalizedMention` принимает `None` (Optional с default None).
+- `url` из TEXT → `HttpUrl` через Pydantic model_validate.
+- `tracking_params_removed` из `TEXT[]` → `list[str]` через asyncpg нативно.
+
+#### G.3.6. `count_signals`
+
+**Сигнатура:**
+
+```python
+async def count_signals(
+    self,
+    project_id: str,
+    since: datetime.datetime | None = None,
+) -> int:
+    """
+    SELECT COUNT(*) FROM signals
+    WHERE project_id = $1
+      AND ($2::timestamptz IS NULL OR signal_created_at >= $2);
+    """
+```
+
+**SQL:**
+
+```sql
+SELECT COUNT(*)
+FROM signals
+WHERE project_id = $1
+  AND ($2::timestamptz IS NULL OR signal_created_at >= $2);
+```
+
+Возвращает `int` (asyncpg отдаёт `int` для `COUNT(*)`).
+
+#### G.3.7. `get_usage_by_period`
+
+**Сигнатура:**
+
+```python
+async def get_usage_by_period(
+    self,
+    project_id: str,
+    since: datetime.datetime,
+) -> list[dict]:
+    """
+    SELECT kind, source_id, SUM(cost_usd) AS total
+    FROM usage_log
+    WHERE project_id = $1 AND occurred_at >= $2
+    GROUP BY kind, source_id;
+    Returns: list of {'kind': str, 'source_id': str, 'total': Decimal}
+    """
+```
+
+**SQL:**
+
+```sql
+SELECT kind, source_id, SUM(cost_usd) AS total
+FROM usage_log
+WHERE project_id = $1
+  AND occurred_at >= $2
+GROUP BY kind, source_id
+ORDER BY kind, source_id;
+```
+
+`SUM(cost_usd)` → asyncpg возвращает `Decimal` (NUMERIC ↔ Decimal нативный mapping).
+
+### G.4. Транзакционность project-CRUD методов
+
+| Метод | Транзакция | Причина |
+|---|---|---|
+| `create_project` | implicit (один INSERT) | атомарно само по себе |
+| `list_projects` | нет | read-only |
+| `get_project` | нет | read-only |
+| `delete_project` | explicit (несколько DELETE) | all-or-nothing по каскаду |
+| `get_mention` | нет | read-only |
+| `count_signals` | нет | read-only |
+| `get_usage_by_period` | нет | read-only |
+
+### G.5. Обновление `schema.sql` snapshot
+
+Исполнитель добавляет DDL таблицы `projects` в `storage/schema.sql` (декларативный
+snapshot, не исполняемый runner-ом). Формат — как существующие таблицы в snapshot.
+
+### G.6. Заглушки в FakeRepository
+
+`processing/_fakes.py::FakeRepository` обновляется:
+- `upsert_project` (старая заглушка) → заменяется на:
+  - `create_project(project) -> Project` — in-memory dict `self._projects: dict[str, Project]`
+  - `list_projects(active_only=True) -> list[Project]` — возвращает список из dict
+  - `get_project(project_id) -> Project | None`
+  - `delete_project(project_id, cascade=True) -> None`
+- `get_mention(mention_id) -> NormalizedMention | None` — ищет в `self._mentions`
+- `count_signals(project_id, since=None) -> int` — `len([s for s in self._signals if s.project_id == project_id])`
+- `get_usage_by_period(project_id, since) -> list[dict]` — возвращает `[]` (no-op в fake)
+
+**Старый метод `upsert_project`** — удаляется из IRepository Protocol и из FakeRepository.
+Обоснование: `upsert_project(project, yaml_source)` — это старый YAML-ориентированный
+контракт (из E2c старого roadmap, отменённого). В Phase 0 CRUD через create/get/list/delete.
+
+**ВАЖНО**: удаление `upsert_project` — breaking change Protocol. Это допустимо сейчас
+потому что `upsert_project` никогда не был реализован полностью — только заглушка
+с `NotImplementedError("requires E2c")`. Ни один production-путь его не вызывает.
+Фиксируется: удаление `upsert_project` из `core/contracts.py` — minor breaking, не требует ADR,
+требует апрува продукт-агента.
+
+### G.7. Открытые вопросы продукт-агенту (по storage)
+
+#### G.7.1. Удаление `upsert_project` из IRepository
+
+`upsert_project(project: Project, yaml_source: str) -> None` — старый метод из
+pre-scope-reset эпохи. YAML-import в Phase 0 не входит. Архитектор предлагает удалить.
+
+**Действие продукт-агента:** подтвердить удаление `upsert_project` из core/contracts.py
+и FakeRepository. Это minor breaking (только заглушки), не требует ADR, но требует
+явного решения.
+
+#### G.7.2. FK signals.project_id → projects.id в Phase 1
+
+В G.1 зафиксировано: FK не добавляем в Phase 0. В Phase 1+ — рассмотреть consolidated
+миграцию для всех FK: `signals.project_id`, `scan_log.project_id`, `usage_log.project_id`.
+До тех пор — application-level cascade в `delete_project`.
+
+#### G.7.3. `updated_at` при редактировании проекта (Phase 1+)
+
+В Phase 0 нет `update_project`. Поле `updated_at` дефолтируется в NOW() при создании.
+В Phase 1+ при добавлении `update_project` нужен явный `SET updated_at = NOW()` в SQL
+(нет Postgres trigger). Executor при реализации `update_project` должен это учесть.
+
+---
+
 ## OPS
 
 - **Type**: folder

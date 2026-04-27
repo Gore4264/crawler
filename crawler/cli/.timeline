@@ -1,0 +1,5 @@
+# .timeline — временные координаты файлов cli/
+# Формат: filename.ext:\n  start: YYYY-MM-DD\n  due: YYYY-MM-DD\n  after: other.ext\n  estimate: Nd/Nw/Nm
+
+CLAUDE.md:
+  start: 2026-04-27

@@ -1,0 +1,8 @@
+# .links — связи с файлами за пределами cli/
+# Формат: filename.ext:\n  - ../relative/path/to/target.md
+
+CLAUDE.md:
+  - ../core/CLAUDE.md
+  - ../storage/CLAUDE.md
+  - ../processing/CLAUDE.md
+  - ../plugins/sources/CLAUDE.md
