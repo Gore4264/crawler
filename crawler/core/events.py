@@ -6,7 +6,7 @@ the bus wraps published events in a JSON envelope keyed on event_type.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, ClassVar, Literal
 from uuid import UUID, uuid4
@@ -21,7 +21,6 @@ from .models import (
     SourceQuery,
 )
 
-
 # --- C.1. Base ---------------------------------------------------------------
 
 
@@ -30,7 +29,7 @@ class DomainEvent(BaseModel):
 
     event_id: UUID = Field(default_factory=uuid4)
     occurred_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     project_id: str | None = None
 

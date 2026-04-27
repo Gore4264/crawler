@@ -12,14 +12,13 @@ runs without docker still produce a clean pass.
 from __future__ import annotations
 
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 
-from crawler.storage import Database, Repository
+from crawler.storage import Database
 from crawler.storage.migrate import run_migrations
-
 
 # Tables we own — listed once so cleanup is explicit.
 _OWNED_TABLES = ("signals", "scan_log", "usage_log", "mentions")

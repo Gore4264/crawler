@@ -28,7 +28,6 @@ from ..core.models import (
 )
 from .database import Database
 
-
 # Columns selected for read-side reconstruction of Signal.
 # `signal_created_at AS created_at` aliases the column back to the
 # pydantic field name (storage/CLAUDE.md A.2).

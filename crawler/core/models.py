@@ -8,7 +8,7 @@ are `decimal.Decimal`.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -50,8 +50,8 @@ BudgetScope = Literal["monthly", "daily", "per_source"]
 def _ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError("datetime must be tz-aware (got naive datetime)")
-    if value.utcoffset() != timezone.utc.utcoffset(value):
-        return value.astimezone(timezone.utc)
+    if value.utcoffset() != UTC.utcoffset(value):
+        return value.astimezone(UTC)
     return value
 
 
@@ -86,7 +86,7 @@ class SourceQuery(BaseModel):
         return None if v is None else _ensure_utc(v)
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "SourceQuery":
+    def _validate_window(self) -> SourceQuery:
         if self.since and self.until and self.until <= self.since:
             raise ValueError("until must be greater than since")
         if self.mode == "stream" and self.until is not None:
@@ -145,7 +145,7 @@ class NormalizedMention(RawMention):
     embedding: list[float] | None = None
 
     @model_validator(mode="after")
-    def _validate_hash_and_embedding(self) -> "NormalizedMention":
+    def _validate_hash_and_embedding(self) -> NormalizedMention:
         if len(self.content_hash) != 64:
             raise ValueError("content_hash must be 64-char hex")
         try:
@@ -221,7 +221,7 @@ class TopicQuery(BaseModel):
     topic_embedding: list[float] | None = None
 
     @model_validator(mode="after")
-    def _validate(self) -> "TopicQuery":
+    def _validate(self) -> TopicQuery:
         if not _SLUG_TOPIC_RE.fullmatch(self.name):
             raise ValueError("TopicQuery.name must be a slug ([a-z0-9_]+)")
         if self.topic_embedding is not None and len(self.topic_embedding) != 1024:
@@ -242,7 +242,7 @@ class BudgetConfig(BaseModel):
     cutoff_threshold: float = 0.95
 
     @model_validator(mode="after")
-    def _validate_thresholds(self) -> "BudgetConfig":
+    def _validate_thresholds(self) -> BudgetConfig:
         if not (0.0 < self.warning_threshold < self.cutoff_threshold <= 1.0):
             raise ValueError("must satisfy 0 < warning < cutoff <= 1")
         if self.monthly_usd <= 0:
@@ -280,7 +280,7 @@ class Project(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate(self) -> "Project":
+    def _validate(self) -> Project:
         if not _SLUG_PROJECT_RE.fullmatch(self.id):
             raise ValueError("Project.id must be a slug ([a-z0-9_-]+)")
         names = [q.name for q in self.queries]

@@ -21,7 +21,6 @@ from pathlib import Path
 
 from .database import Database
 
-
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _FILENAME_RE = re.compile(r"^(\d{3})_[a-z0-9_]+\.sql$")
 _BOOTSTRAP_SQL = """\

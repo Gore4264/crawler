@@ -6,20 +6,16 @@ Section B of core/CLAUDE.md. All Protocol classes are static-only
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from decimal import Decimal
 from typing import (
+    TYPE_CHECKING,
     Any,
-    AsyncIterator,
-    Awaitable,
-    Callable,
     Literal,
     Protocol,
-    TYPE_CHECKING,
 )
 from uuid import UUID, uuid4
-
-from .models import RawMention
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +28,7 @@ from .models import (
     NotificationConfig,
     NotificationStatus,
     Project,
+    RawMention,
     ScanStatus,
     Sentiment,
     Signal,
@@ -101,7 +98,7 @@ class IStreamingSource(ISource, Protocol):
         """Close connection, drain buffer."""
         ...
 
-    async def __aenter__(self) -> "IStreamingSource": ...
+    async def __aenter__(self) -> IStreamingSource: ...
 
     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None: ...
 
@@ -283,12 +280,12 @@ class Subscription(BaseModel):
 
 
 class IEventBus(Protocol):
-    async def publish(self, event: "DomainEvent") -> None: ...
+    async def publish(self, event: DomainEvent) -> None: ...
 
     async def subscribe(
         self,
-        event_type: type["DomainEvent"],
-        handler: Callable[["DomainEvent"], Awaitable[None]],
+        event_type: type[DomainEvent],
+        handler: Callable[[DomainEvent], Awaitable[None]],
     ) -> Subscription: ...
 
     async def unsubscribe(self, subscription: Subscription) -> None: ...

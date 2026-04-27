@@ -7,7 +7,7 @@ fixtures live in tests/conftest.py.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -26,7 +26,7 @@ from crawler.storage.migrate import run_migrations
 
 
 def _utc(*args, **kwargs) -> datetime:
-    return datetime(*args, **kwargs, tzinfo=timezone.utc)
+    return datetime(*args, **kwargs, tzinfo=UTC)
 
 
 def _make_mention(seed: int) -> NormalizedMention:
@@ -35,7 +35,7 @@ def _make_mention(seed: int) -> NormalizedMention:
     text = f"sample mention number {seed}"
     text_clean = text  # already normalized for the test
     content_hash = hashlib.sha256(text_clean.encode("utf-8")).hexdigest()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return NormalizedMention(
         source_id="test_source",
         external_id=f"ext-{seed}",
@@ -61,7 +61,7 @@ def _make_mention(seed: int) -> NormalizedMention:
 
 def _make_signal(mention: NormalizedMention, *, intent: Intent = "discussion",
                  score: float = 0.8, project_id: str = "demo") -> Signal:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     trace = [
         PipelineTraceEntry(
             stage_name="normalize",
