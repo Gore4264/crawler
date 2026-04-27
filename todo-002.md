@@ -1,8 +1,8 @@
 ---
 id: todo-002
-status: open
+status: done
 created: 2026-04-27
-completed: null
+completed: 2026-04-27
 session: null
 launch_dir: ""
 ---
@@ -370,3 +370,62 @@ Layout проекта — flat namespace package `crawler/` (см. todo-001 фи
 - Если возник конфликт между sources/CLAUDE.md или processing/CLAUDE.md
   и core или storage — НЕ правь архитектурные документы, фиксируй в
   `## Результат` как «требует решения продукт-агента».
+
+## Результат
+
+E1 / Ветка 2 — реализация на FakeRepository завершена. Закоммичено в submodule `repo-crawler` коммитом `d6728fa`.
+
+### Созданные файлы (production)
+
+- `crawler/plugins/__init__.py`, `crawler/plugins/sources/__init__.py` — инициализация пакетов с `SOURCE_REGISTRY`.
+- `crawler/plugins/sources/_base.py` — `BaseSource[ConfigT]` (PEP 695 generics), `BaseStreamingSource(BaseSource)` каркас под Bluesky-firehose в E3, `_with_retry` декоратор через `tenacity`, `aiolimiter` интеграция.
+- `crawler/plugins/sources/reddit.py` — `RedditSource` через `praw` + `asyncio.to_thread`, маппинг `praw.Submission` → `RawMention`, cursor-формат `t3_xxx`.
+- `crawler/plugins/sources/_registry.py` — реестр.
+- `crawler/processing/__init__.py`, `crawler/processing/stages/__init__.py` — пакетная инициализация с экспортом стадий.
+- `crawler/processing/pipeline.py` — `Pipeline(stages, repository).run(mentions, project)` с трассировкой через `PipelineTraceEntry`, structlog-логированием, early-exit при пустом батче.
+- `crawler/processing/context.py` — `PipelineContext` (project, scan_id, repository, trace, pending_signals).
+- `crawler/processing/_fakes.py` — `FakeRepository` (in-memory `_mentions`, `_signals`, `_cursors`, остальные методы IRepository — NotImplementedError).
+- `crawler/processing/stages/normalize.py` — алгоритм core D полностью (NFKC + selectolax HTML-strip + langdetect + 19 tracking-params).
+- `crawler/processing/stages/dedup.py` — sha256 + in-batch first-wins + `existing_hashes`.
+- `crawler/processing/stages/keyword_filter.py` — word-boundary для слов >3 chars, substring для коротких, multi-word substring, lazy-compile + cache по `project.id`, empty-keywords no-op (per-project decision F.1).
+- `crawler/processing/stages/decide.py` — синтетический: `relevance=1.0`, `intent=other`, `is_spam=False`, `matched_query=project.queries[0].name`, складывает в `ctx.pending_signals` и возвращает `[]`.
+
+### Созданные файлы (tests, 62 unit, ~2.3 sec)
+
+- `tests/unit/conftest.py` — `make_raw_mention`, `make_project` фикстуры.
+- `tests/unit/test_normalize.py` (14 тестов) — детерминированность hash, cross-source identity, UTM-stripping, HTML-equivalence, NFKC, lang detection.
+- `tests/unit/test_dedup.py` (6 тестов) — in-batch first-wins, фильтрация против FakeRepository, edge-cases.
+- `tests/unit/test_keyword_filter.py` (12 тестов) — все 4 стратегии регулярок + cache.
+- `tests/unit/test_decide.py` (7 тестов) — поля Signal, pipeline_trace, matched_query.
+- `tests/unit/test_pipeline_e2e.py` (8 тестов) — end-to-end на синтетических батчах через FakeRepository.
+- `tests/unit/test_reddit_source.py` (15 тестов) — capabilities, registry, init, маппинг с моками PRAW.
+
+### Изменения зависимостей
+
+`pyproject.toml` — добавлены `praw>=7.7`, `selectolax>=0.3`, `langdetect>=1.0`, `aiolimiter>=1.1`, `tenacity>=8.0`, `httpx>=0.28`, `structlog`. Конфликтов нет.
+
+### Статус критериев готовности
+
+1. ✅ Все файлы созданы по структуре.
+2. ✅ `pyright crawler/ tests/` — 0 errors, 0 warnings.
+3. ✅ `ruff check crawler/ tests/` — All checks passed (после `--fix --unsafe-fixes`).
+4. ✅ `pytest tests/unit/ -v` — 62 passed, 0 failed, 2.28 sec.
+5. ✅ `from crawler.plugins.sources import SOURCE_REGISTRY` работает, `SOURCE_REGISTRY["reddit"] is RedditSource`.
+6. ✅ Pipeline e2e через FakeRepository возвращает list[Signal] (test_pipeline_returns_signals, test_pipeline_criteria_6 — оба зелёные).
+7. ✅ `RedditSource.capabilities.supports_streaming is False`, наследование от `BaseSource[RedditConfig]` без падений.
+8. ✅ Коммит `d6728fa` в submodule с упоминанием `todo-002`.
+
+### Поправки на финальном прогоне
+
+1. `tests/unit/conftest.py` — баг в `make_project`: `keywords or default` ловил пустой список (`[]` falsy в Python) и подменял на default `["anthropic","claude"]`. Заменено на `if keywords is None`. Этот баг сломал один тест `test_pipeline_empty_keywords_pass_all` (продукт-агент починил при приёмке).
+2. `ruff --fix --unsafe-fixes` применён ко всему `crawler/` + `tests/` — обновлены до `datetime.UTC` alias (Python 3.12+), удалены лишние forward-ref кавычки (благодаря `from __future__ import annotations`), `BaseSource(Generic[ConfigT])` → `class BaseSource[ConfigT: BaseSourceConfig]:` (PEP 695). Семантика не меняется, pyright clean.
+
+### Открытые наблюдения
+
+- **Integration-tests `tests/integration/test_storage.py` НЕ запускались** в этой сессии (нет CRAWLER_DATABASE_DSN / Postgres). Ruff внёс косметические правки (`UTC` alias, форвард-реф кавычки) в `core/*` и `storage/*` — семантика не меняется, но интеграционная сессия E1 (после трёх веток) должна заново прогнать `test_storage.py` для верификации.
+- **Source `since_cursor` в FakeRepository** — реализован через `_cursors: dict[(project,source,query), str]`. `RedditSource.search()` сохраняет последний `t3_xxx` через `repository.set_cursor`. В интеграционной сессии E1 это перейдёт в реальную таблицу `source_cursors` (миграция 002, по рекомендации архитектора F.2).
+- **Все 6 решений продукт-агента из todo-002 применены** без отклонений.
+
+### Конфликты с архитектурой
+
+Конфликтов с `core/CLAUDE.md`, `storage/CLAUDE.md`, `plugins/sources/CLAUDE.md`, `processing/CLAUDE.md` не обнаружено. Все архитектурные решения архитектора применены как описано.
