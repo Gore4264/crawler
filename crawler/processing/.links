@@ -1,0 +1,9 @@
+# .links — связи с файлами за пределами crawler/processing/
+# Формат:
+# filename.ext:
+#   - ../relative/path/to/target.md
+
+CLAUDE.md:
+  - ../core/CLAUDE.md
+  - ../storage/CLAUDE.md
+  - ../plugins/sources/CLAUDE.md

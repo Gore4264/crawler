@@ -1,0 +1,4 @@
+# .links — связи с файлами за пределами crawler/plugins/
+# Формат:
+# filename.ext:
+#   - ../relative/path/to/target.md

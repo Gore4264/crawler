@@ -1,0 +1,7 @@
+# .timeline — временные координаты файлов в crawler/plugins/
+# Формат:
+# filename.ext:
+#   start: YYYY-MM-DD
+#   due: YYYY-MM-DD
+#   after: other.ext
+#   estimate: 2w

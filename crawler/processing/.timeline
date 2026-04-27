@@ -1,0 +1,38 @@
+# .timeline — временные координаты файлов в crawler/processing/
+# Формат:
+# filename.ext:
+#   start: YYYY-MM-DD
+#   due: YYYY-MM-DD
+#   after: other.ext
+#   estimate: 2w
+
+CLAUDE.md:
+  start: 2026-04-27
+
+context.py:
+  after: CLAUDE.md
+  estimate: 2h
+
+pipeline.py:
+  after: context.py
+  estimate: 1d
+
+_fakes.py:
+  after: CLAUDE.md
+  estimate: 2h
+
+stages/normalize.py:
+  after: pipeline.py
+  estimate: 1d
+
+stages/dedup.py:
+  after: stages/normalize.py
+  estimate: 4h
+
+stages/keyword_filter.py:
+  after: stages/dedup.py
+  estimate: 4h
+
+stages/decide.py:
+  after: stages/keyword_filter.py
+  estimate: 1h

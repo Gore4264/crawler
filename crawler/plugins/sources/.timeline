@@ -1,0 +1,18 @@
+# .timeline — временные координаты файлов в crawler/plugins/sources/
+# Формат:
+# filename.ext:
+#   start: YYYY-MM-DD
+#   due: YYYY-MM-DD
+#   after: other.ext
+#   estimate: 2w
+
+CLAUDE.md:
+  start: 2026-04-27
+
+_base.py:
+  after: CLAUDE.md
+  estimate: 1d
+
+reddit.py:
+  after: _base.py
+  estimate: 1d
