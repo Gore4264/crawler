@@ -12,7 +12,7 @@ import dataclasses
 from uuid import UUID
 
 from crawler.core.contracts import IRepository
-from crawler.core.models import PipelineTraceEntry, Project, Signal
+from crawler.core.models import NormalizedMention, PipelineTraceEntry, Project, Signal
 
 
 @dataclasses.dataclass
@@ -23,6 +23,7 @@ class PipelineContext:
     Stages can:
       - read: project, repository, scan_id
       - append: trace entries (via add_trace), pending_signals
+      - populate: all_normalized (NormalizeStage), surviving_mentions (DedupStage)
     """
 
     project: Project
@@ -30,6 +31,10 @@ class PipelineContext:
     repository: IRepository
     trace: list[PipelineTraceEntry] = dataclasses.field(default_factory=list)
     pending_signals: list[Signal] = dataclasses.field(default_factory=list)
+    # NEW: populated by NormalizeStage — all normalized mentions before dedup
+    all_normalized: list[NormalizedMention] = dataclasses.field(default_factory=list)
+    # NEW: populated by DedupStage — mentions that survived dedup (new to DB)
+    surviving_mentions: list[NormalizedMention] = dataclasses.field(default_factory=list)
 
     def add_trace(
         self,

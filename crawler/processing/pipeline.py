@@ -16,7 +16,7 @@ from crawler.core.contracts import IRepository, IStage
 from crawler.core.models import NormalizedMention, PipelineTraceEntry, Project, RawMention, Signal
 
 if TYPE_CHECKING:
-    pass
+    from crawler.processing.context import PipelineContext
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +39,7 @@ class Pipeline:
     ) -> None:
         self._stages = stages
         self._repository = repository
+        self._last_ctx: PipelineContext | None = None  # set after run()
 
     async def run(
         self,
@@ -108,4 +109,10 @@ class Pipeline:
                 )
                 break
 
+        self._last_ctx = ctx
         return ctx.pending_signals
+
+    @property
+    def last_ctx(self) -> PipelineContext | None:
+        """Return the PipelineContext from the most recent run() call."""
+        return self._last_ctx

@@ -50,4 +50,7 @@ class DedupStage:
 
         # Step 3: filter out already-seen
         result = [m for m in deduped_batch if m.content_hash not in existing]
+
+        # Populate ctx.surviving_mentions (used by api_core/scanning.py)
+        ctx.surviving_mentions.extend(result)
         return result

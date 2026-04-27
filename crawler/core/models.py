@@ -287,3 +287,23 @@ class Project(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("TopicQuery.name must be unique within Project")
         return self
+
+
+# --- A.11. UsageEntry --------------------------------------------------------
+
+
+class UsageEntry(BaseModel):
+    """Single usage-log entry — used by get_usage_by_period and append_usage."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: UsageKind
+    source_id: str
+    cost_usd: Decimal
+    occurred_at: datetime
+    count: int = 1
+
+    @field_validator("occurred_at", mode="after")
+    @classmethod
+    def _validate_tz(cls, v: datetime) -> datetime:
+        return _ensure_utc(v)

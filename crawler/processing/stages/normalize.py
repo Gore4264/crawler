@@ -208,4 +208,6 @@ class NormalizeStage:
             )
             result.append(normalized)
 
+        # Populate ctx.all_normalized (used by api_core/scanning.py)
+        ctx.all_normalized.extend(result)
         return result

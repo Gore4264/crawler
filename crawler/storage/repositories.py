@@ -258,28 +258,57 @@ class Repository(IRepository):
         intent: Intent | None = None,
         min_score: float | None = None,
         limit: int = 100,
+        query: str | None = None,
     ) -> list[Signal]:
-        sql = f"""
-        SELECT {_SIGNAL_SELECT_COLUMNS}
-        FROM signals
-        WHERE project_id = $1
-          AND ($2::timestamptz IS NULL OR signal_created_at >= $2)
-          AND ($3::timestamptz IS NULL OR signal_created_at <= $3)
-          AND ($4::text IS NULL OR intent = $4)
-          AND ($5::real IS NULL OR relevance_score >= $5)
-        ORDER BY signal_created_at DESC
-        LIMIT $6
-        """
-        async with self._db.acquire() as conn:
-            rows = await conn.fetch(
-                sql,
-                project_id,
-                since,
-                until,
-                intent,
-                min_score,
-                limit,
-            )
+        if query is not None:
+            # ILIKE search via JOIN with mentions on text_clean (E1, pre-E2)
+            sql = f"""
+            SELECT s.{", s.".join(_SIGNAL_SELECT_COLUMNS.split(", "))}
+            FROM signals s
+            JOIN mentions m ON s.mention_id = m.id
+            WHERE s.project_id = $1
+              AND ($2::timestamptz IS NULL OR s.signal_created_at >= $2)
+              AND ($3::timestamptz IS NULL OR s.signal_created_at <= $3)
+              AND ($4::text IS NULL OR s.intent = $4)
+              AND ($5::real IS NULL OR s.relevance_score >= $5)
+              AND m.text_clean ILIKE $7
+            ORDER BY s.signal_created_at DESC
+            LIMIT $6
+            """
+            ilike_pattern = f"%{query}%"
+            async with self._db.acquire() as conn:
+                rows = await conn.fetch(
+                    sql,
+                    project_id,
+                    since,
+                    until,
+                    intent,
+                    min_score,
+                    limit,
+                    ilike_pattern,
+                )
+        else:
+            sql = f"""
+            SELECT {_SIGNAL_SELECT_COLUMNS}
+            FROM signals
+            WHERE project_id = $1
+              AND ($2::timestamptz IS NULL OR signal_created_at >= $2)
+              AND ($3::timestamptz IS NULL OR signal_created_at <= $3)
+              AND ($4::text IS NULL OR intent = $4)
+              AND ($5::real IS NULL OR relevance_score >= $5)
+            ORDER BY signal_created_at DESC
+            LIMIT $6
+            """
+            async with self._db.acquire() as conn:
+                rows = await conn.fetch(
+                    sql,
+                    project_id,
+                    since,
+                    until,
+                    intent,
+                    min_score,
+                    limit,
+                )
         return [_signal_from_row(r) for r in rows]
 
     async def search_hybrid(
@@ -421,16 +450,118 @@ class Repository(IRepository):
     ) -> None:
         raise NotImplementedError("requires storage support from E5")
 
-    # ----- Projects (E2c stub) ---------------------------------------------
+    # ----- Projects ---------------------------------------------------------
 
-    async def upsert_project(self, project: Project, yaml_source: str) -> None:
-        raise NotImplementedError("requires storage support from E2c")
+    async def create_project(self, project: Project) -> Project:
+        """INSERT project into projects table. Returns original project.
+        Raises asyncpg.UniqueViolationError on duplicate id."""
+        config_json = project.model_dump(mode="json")
+        async with self._db.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO projects (id, name, config, is_active) "
+                "VALUES ($1, $2, $3::jsonb, TRUE)",
+                project.id,
+                project.name,
+                config_json,
+            )
+        return project
 
-    async def get_project(self, id: str) -> Project | None:
-        raise NotImplementedError("requires storage support from E2c")
+    async def list_projects(self, active_only: bool = True) -> list[Project]:
+        """SELECT projects, optionally filtered to is_active=TRUE."""
+        sql = """
+        SELECT config FROM projects
+        WHERE (NOT $1 OR is_active = TRUE)
+        ORDER BY created_at DESC
+        """
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(sql, active_only)
+        return [Project.model_validate(row["config"]) for row in rows]
 
-    async def list_projects(self) -> list[Project]:
-        raise NotImplementedError("requires storage support from E2c")
+    async def get_project(self, project_id: str) -> Project | None:
+        """SELECT project by id (regardless of is_active)."""
+        async with self._db.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT config FROM projects WHERE id = $1",
+                project_id,
+            )
+        if row is None:
+            return None
+        return Project.model_validate(row["config"])
+
+    async def delete_project(self, project_id: str, *, cascade: bool = True) -> None:
+        """Delete project and optionally its signals/scan_log/usage_log in a transaction."""
+        async with self._db.transaction() as conn:
+            if cascade:
+                await conn.execute(
+                    "DELETE FROM signals WHERE project_id = $1", project_id
+                )
+                await conn.execute(
+                    "DELETE FROM scan_log WHERE project_id = $1", project_id
+                )
+                await conn.execute(
+                    "DELETE FROM usage_log WHERE project_id = $1", project_id
+                )
+            await conn.execute(
+                "DELETE FROM projects WHERE id = $1", project_id
+            )
+
+    async def get_mention(self, mention_id: UUID) -> Any:
+        """SELECT mention by id. Returns NormalizedMention | None."""
+        sql = """
+        SELECT id, content_hash, source_id, external_id,
+               author, author_id, text, text_html, url, lang_hint,
+               engagement, raw, published_at, discovered_at, fetched_at,
+               text_clean, lang, is_html_stripped, normalize_version,
+               tracking_params_removed,
+               created_at
+        FROM mentions
+        WHERE id = $1
+        """
+        async with self._db.acquire() as conn:
+            row = await conn.fetchrow(sql, mention_id)
+        if row is None:
+            return None
+        data = dict(row)
+        # embedding and minhash_signature not in Phase 0 schema → default None
+        data["embedding"] = None
+        data["minhash_signature"] = None
+        return NormalizedMention.model_validate(data)
+
+    async def count_signals(
+        self, project_id: str, since: datetime | None = None
+    ) -> int:
+        """COUNT(*) FROM signals WHERE project_id (and optional since)."""
+        async with self._db.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM signals "
+                "WHERE project_id = $1 "
+                "  AND ($2::timestamptz IS NULL OR signal_created_at >= $2)",
+                project_id,
+                since,
+            )
+        assert row is not None
+        return int(row["cnt"])
+
+    async def get_usage_by_period(
+        self,
+        project_id: str,
+        since: datetime,
+    ) -> list[dict]:
+        """GROUP BY kind, source_id for usage_log in period."""
+        sql = """
+        SELECT kind, source_id, SUM(cost_usd) AS total
+        FROM usage_log
+        WHERE project_id = $1
+          AND occurred_at >= $2
+        GROUP BY kind, source_id
+        ORDER BY kind, source_id
+        """
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(sql, project_id, since)
+        return [
+            {"kind": r["kind"], "source_id": r["source_id"], "total": Decimal(r["total"])}
+            for r in rows
+        ]
 
     # ----- Feedback (E5 stub) -----------------------------------------------
 

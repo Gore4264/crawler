@@ -148,8 +148,9 @@ class IRepository(Protocol):
         intent: Intent | None = None,
         min_score: float | None = None,
         limit: int = 100,
+        query: str | None = None,
     ) -> list[Signal]:
-        """Read-only feed for API."""
+        """Read-only feed for API. query: ILIKE filter on text_clean (E1)."""
         ...
 
     async def search_hybrid(
@@ -221,11 +222,25 @@ class IRepository(Protocol):
     ) -> None: ...
 
     # --- Projects ---
-    async def upsert_project(self, project: Project, yaml_source: str) -> None: ...
+    async def create_project(self, project: Project) -> Project: ...
 
-    async def get_project(self, id: str) -> Project | None: ...
+    async def list_projects(self, active_only: bool = True) -> list[Project]: ...
 
-    async def list_projects(self) -> list[Project]: ...
+    async def get_project(self, project_id: str) -> Project | None: ...
+
+    async def delete_project(self, project_id: str, *, cascade: bool = True) -> None: ...
+
+    async def get_mention(self, mention_id: UUID) -> NormalizedMention | None: ...
+
+    async def count_signals(
+        self, project_id: str, since: datetime | None = None
+    ) -> int: ...
+
+    async def get_usage_by_period(
+        self,
+        project_id: str,
+        since: datetime,
+    ) -> list[dict]: ...
 
     # --- Feedback ---
     async def record_feedback(
