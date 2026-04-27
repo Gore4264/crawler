@@ -4,6 +4,32 @@
 
 ---
 
+## ⚙ Phase 0 scope (актуально 2026-04-27)
+
+Документ описывает **полную целевую архитектуру** на горизонт Phase 1-3.
+В Phase 0 (MVP-инструмент ручного режима) реализуется **подмножество**:
+
+**В Phase 0:** Domain Core (раздел 1), Storage (2), Sources (3 — только
+Reddit), Processing (5 — все 8 стадий), MCP-сервер (часть раздела 8.4) +
+**новый CLI-слой** (не описан в этом документе, см. `crawler/cli/CLAUDE.md`
+после Ветки 3 E1).
+
+**Phase 1+ (НЕ в Phase 0):**
+- Раздел 4 (Orchestration: scheduler / budget guard / dispatcher / retry policy).
+- Раздел 5.4 параллелизм через scheduler (одиночные ручные scan-ы достаточны).
+- Раздел 6 (Configuration: YAML-конфиг проектов — заменяется CRUD через CLI/MCP).
+- Раздел 7 (Notifications: Telegram, webhook, email, inline-feedback, filter-движок).
+- Раздел 8.1-8.3 (REST API, WebSocket, FastAPI) — заменяются MCP-only.
+- Раздел 9.1 (Event Bus: Postgres LISTEN/NOTIFY) — Phase 0 без bus.
+- 7-дневный soak-test (`KPI #8`) — нерелевантен для pull-инструмента.
+
+**Контракты остаются совместимы:** `INotifier`, `IEventBus`, `IQueue` Protocol-ы
+живут в `core/contracts.py` как stubs без имплементаций (оставлены под Phase 1+).
+
+См. `ROADMAP.md` для пошагового плана Phase 0.
+
+---
+
 ## ⚠ Критические приоритеты: что важнее остального
 
 Три акцента, без которых остальной документ можно прочитать неправильно. Если документ читается по диагонали — этот раздел читается полностью.
